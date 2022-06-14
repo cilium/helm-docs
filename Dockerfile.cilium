@@ -1,0 +1,33 @@
+ARG GO_VERSION=1.18.3
+
+FROM --platform=${BUILDPLATFORM} golang:${GO_VERSION}-bullseye as builder
+# TARGETARCH is an automatic platform ARG enabled by Docker BuildKit.
+ARG TARGETARCH
+# TARGETOS is an automatic platform ARG enabled by Docker BuildKit.
+ARG TARGETOS
+
+ARG HELM_VERSION=3.9.0
+ARG GO111MODULE=on
+ARG GOARCH=${TARGETARCH}
+ARG CGO_ENABLED=0
+
+WORKDIR /tmp
+RUN curl -sS -L https://get.helm.sh/helm-v${HELM_VERSION}-${TARGETOS}-${TARGETARCH}.tar.gz -o helm.tar.gz \
+    && tar xvzf helm.tar.gz \
+    && cp ${TARGETOS}-${TARGETARCH}/helm /usr/bin/helm
+
+WORKDIR /go/src/helm-docs
+ADD . /go/src/helm-docs
+RUN go build ./cmd/helm-docs
+
+FROM gcr.io/distroless/static-debian11:latest@sha256:2ad95019a0cbf07e0f917134f97dd859aaccc09258eb94edcb91674b3c1f448f
+
+COPY --from=builder /usr/bin/helm /usr/bin/helm
+COPY --from=builder /go/src/helm-docs/helm-docs /usr/bin/helm-docs
+
+# Distroless makes "helm-docs" binary fail in weird ways like this by default:
+#   time="2022-06-14T22:11:22Z" level=fatal msg="error finding chart directories: lstat /proc/1/fd/3: no such file or directory"
+# However you can just run it like this and it works:
+# $ docker container run --rm --workdir /src/install/kubernetes --volume /path/to/cilium/:/src --user "1001:1001" this-image
+
+CMD ["helm-docs"]
